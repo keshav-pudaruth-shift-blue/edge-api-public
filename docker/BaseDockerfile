@@ -1,0 +1,132 @@
+FROM php:8.1-fpm-alpine3.15
+
+# Arguments
+
+ARG VERSION
+
+LABEL org.opencontainers.image.authors="Keshav Pudaruth <keshav.pudaruth@shift.blue>" \
+      org.opencontainers.image.title="Laravel PHP-FPM 8.1 with NGINX Alpine" \
+      org.opencontainers.image.description="PHP-FPM-NGINX Alpine Container for Shift" \
+      org.opencontainers.image.version="Version ${VERSION}"
+
+#
+#--------------------------------------------------------------------------
+# Packages installation
+#--------------------------------------------------------------------------
+#
+
+RUN apk update
+RUN apk add htop mysql-client nano nginx oniguruma-dev supervisor unzip tzdata vim
+
+#
+#--------------------------------------------------------------------------
+# Nginx configuration
+#--------------------------------------------------------------------------
+#
+
+RUN mkdir -p /run/nginx
+#RUN rm /etc/nginx/conf.d/default.conf
+#COPY docker/nginx/nginx.conf /etc/nginx/nginx.conf
+#COPY docker/nginx/app.conf /etc/nginx/http.d/nginx.conf
+
+#
+#--------------------------------------------------------------------------
+# PHP Extensions Installer
+#--------------------------------------------------------------------------
+#
+
+ADD https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
+RUN chmod uga+x /usr/local/bin/install-php-extensions && sync
+
+#
+#--------------------------------------------------------------------------
+# PHP Extensions Installation
+#--------------------------------------------------------------------------
+#
+
+RUN install-php-extensions gd bcmath gettext intl mcrypt mysqli opcache pdo_mysql pdo_sqlsrv pcntl redis sockets yaml zip
+
+#
+#--------------------------------------------------------------------------
+# PHP Configuration
+#--------------------------------------------------------------------------
+#
+COPY docker/php/php.ini /usr/local/etc/php/php.ini
+COPY docker/php/php-cli.ini /usr/local/etc/php/php-cli.ini
+COPY docker/php/laravel.ini /usr/local/etc/php/conf.d/laravel.ini
+COPY docker/php/conf.d/opcache.ini /usr/local/etc/php/conf.d/opcache.ini
+COPY docker/php/cacert.pem /usr/local/etc/php/cacert.pem
+
+#
+#--------------------------------------------------------------------------
+# PHP-FPM Configuration
+#--------------------------------------------------------------------------
+#
+COPY docker/php-fpm/php-fpm.conf /usr/local/etc/php-fpm.conf
+COPY docker/php-fpm/www.conf /usr/local/etc/php-fpm.d/zz-docker.conf
+RUN rm -rf /usr/local/etc/php-fpm.d/www.conf && touch /var/run/php-fpm.sock
+
+#
+#--------------------------------------------------------------------------
+# MYSQL Configuration
+#--------------------------------------------------------------------------
+#
+
+RUN mkdir /var/run/mysql \
+    && touch /var/run/mysql/mysql.sock \
+    && chmod 777 /var/run/mysql/mysql.sock \
+    && chown www-data:www-data /var/run/mysql/mysql.sock;
+
+#
+#--------------------------------------------------------------------------
+# Supervisord Configuration
+#--------------------------------------------------------------------------
+#
+# Modify the ./supervisor.conf file to match your App's requirements.
+# Make sure you rebuild your container with every change.
+#
+
+COPY docker/supervisor/supervisord.conf /etc/supervisor/supervisord.conf
+
+#
+#-------------
+# Supercronic (crontab)
+#-------------
+#
+
+RUN curl -fsSLO "https://github.com/aptible/supercronic/releases/download/v0.2.1/supercronic-linux-amd64" \
+ && echo "d7f4c0886eb85249ad05ed592902fa6865bb9d70  supercronic-linux-amd64" | sha1sum -c - \
+ && chmod +x "supercronic-linux-amd64" \
+ && mv "supercronic-linux-amd64" "/usr/local/bin/supercronic-linux-amd64" \
+ && ln -s "/usr/local/bin/supercronic-linux-amd64" /usr/local/bin/supercronic
+
+#
+#--------------------------------------------------------------------------
+# Composer Setup
+#--------------------------------------------------------------------------
+#
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin/ --filename=composer
+ENV COMPOSER_ALLOW_SUPERUSER 1
+
+#
+#--------------------------------------------------------------------------
+# Security Fixes
+#--------------------------------------------------------------------------
+#
+
+#RUN apk upgrade libxml2 curl
+
+#
+#--------------------------------------------------------------------------
+# Execution
+#--------------------------------------------------------------------------
+#
+
+# Expose the port nginx is reachable on
+EXPOSE 80
+
+# Let supervisord start nginx & php-fpm
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+
+# Configure a healthcheck to validate that everything is up&running
+HEALTHCHECK --timeout=10s CMD curl --silent --fail http://127.0.0.1/api/health-check

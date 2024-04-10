@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-api
+  namespace: shift
+  labels:
+    app: edge-api
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 10%
+  selector:
+    matchLabels:
+      app: edge-api
+  template:
+    metadata:
+      labels:
+        app: edge-api
+    spec:
+      imagePullSecrets:
+        - name: keshavpudaruthshift-dockerhub
+      containers:
+        - name: edge-api
+          image: keshavpudaruthshift/shift-edge:api-fac4b8c12254f4e4460f0dca9789ccec2c472728.85
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: edge-api
+          livenessProbe:
+            httpGet:
+              path: /kube/health-check
+              port: 80
+            initialDelaySeconds: 20
+            failureThreshold: 3
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /kube/health-check
+              port: 80
+            initialDelaySeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+            timeoutSeconds: 30
+            periodSeconds: 60
+          resources:
+            requests:
+              memory: "500M"
+              cpu: "0.5"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+      restartPolicy: Always

@@ -1,0 +1,83 @@
+name: Docker Image Build & Push
+
+concurrency:
+  group: production
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [ "master" ]
+
+jobs:
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up branch
+        uses: actions/checkout@v2
+      - name: Run tests in docker
+        uses: addnab/docker-run-action@v3
+        with:
+          username: ${{ secrets.HG_DOCKER_USERNAME }}
+          password: ${{ secrets.HG_DOCKER_PASSWORD }}
+          image: hgdockerza/phpunit:8.1-alpine.11
+          options: -v ${{ github.workspace }}:/var/www/html
+          run: |
+            cd /var/www/html
+            composer install -n --no-scripts --ignore-platform-reqs
+            php artisan test --parallel --testsuite CI
+
+  build-and-push:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    outputs:
+      docker-image-name: ${{ steps.set-docker-image-name.outputs.docker-image-name }}
+    steps:
+      -
+        name: Set up branch
+        uses: actions/checkout@v2
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      -
+        name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Set docker image name
+        id: set-docker-image-name
+        run: echo "docker-image-name=api-${{ github.sha }}.${{ github.run_number }}" >> $GITHUB_OUTPUT
+      - name: Build and push
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: keshavpudaruthshift/shift-edge:${{ steps.set-docker-image-name.outputs.docker-image-name }}
+          build-args: |
+            BASE_IMAGE_VERSION=base-1.1.0-php-8-1-alpine
+            ENVIRONMENT=production
+            DOMAIN=https://edge-api.shift.blue
+            VERSION=${{ github.sha }}
+
+  deployment:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get KubeConfig
+        id: get-kubeconfig
+        uses: timheuer/base64-to-file@v1.2
+        with:
+          encodedString: ${{ secrets.SHIFT_K8S_CLUSTER_CONFIG }}
+          fileName: kubeconfig
+          fileDir: '/tmp/'
+      - name: Deploy to k8s cluster
+        uses: addnab/docker-run-action@v3
+        with:
+          image: bitnami/kubectl:1.24-debian-11
+          options: -v ${{ steps.get-kubeconfig.outputs.filePath }}:/.kube/config
+          run: kubectl set image deployment/edge-api edge-api=keshavpudaruthshift/shift-edge:${{ needs.build-and-push.outputs.docker-image-name }} -n shift

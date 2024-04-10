@@ -1,0 +1,19 @@
+apiVersion: datadoghq.com/v2alpha1
+kind: DatadogAgent
+metadata:
+  name: datadog
+spec:
+  global:
+    credentials:
+      apiSecret:
+        secretName: datadog-secret
+        keyName: api-key
+  features:
+    logCollection:
+      enabled: true
+      containerCollectAll: false
+  override:
+    nodeAgent:
+      env:
+      - name: DD_CONTAINER_INCLUDE_LOGS # <--- Add this line
+        value: "name:edge-api"

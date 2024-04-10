@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  shift_edge_db:
+    container_name: shift_edge_db
+    image: mysql:8
+    command:  [ mysqld, --default-authentication-plugin=mysql_native_password, --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci, --innodb_monitor_enable=all, --max-connections=1001]
+    restart: unless-stopped
+    ports:
+      - "3307:3306"
+    networks:
+      - shift_edge_net
+    environment:
+      MYSQL_USER: shift_edge_api
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: shift_edge
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  shift_edge_api:
+    container_name: shift_edge_api
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        DEV: "false"
+        DASHED_VERSION: "0-1-0"
+        DOMAIN: "localhost"
+        VERSION: "0.1.0"
+        ENVIRONMENT: "local"
+        BASE_IMAGE_VERSION: "base-1.2.0-php-8-1-alpine"
+    environment:
+      XDEBUG_REMOTE_HOST: host.docker.internal
+      PHP_OPCACHE_ENABLED: 0
+    volumes:
+      - ./:/var/www/html/
+    ports:
+      - "8080:80"
+    networks:
+      - shift_edge_net
+
+  shift_edge_redis:
+    restart: always
+    container_name: shift_edge_redis
+    image: redis:alpine
+    volumes:
+      - redis-data:/data
+    networks:
+      - shift_edge_net
+
+networks:
+  shift_edge_net:
+    external: true
+
+volumes:
+  mysql-data:
+  redis-data:
